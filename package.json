@@ -1,0 +1,37 @@
+{
+  "name": "workspace",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "server": "node server.js",
+    "start": "node server.js",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "engines": {
+    "node": "20.x",
+    "npm": "10.x"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.0.1",
+    "@vitejs/plugin-react": "^5.0.2",
+    "bcryptjs": "^3.0.2",
+    "chart.js": "^4.5.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "express-validator": "^7.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "mongodb": "^6.19.0",
+    "react": "^19.1.1",
+    "react-chartjs-2": "^5.3.0",
+    "react-dom": "^19.1.1",
+    "sortablejs": "^1.15.6",
+    "vite": "^7.1.4"
+  }
+}

@@ -1,0 +1,619 @@
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const { MongoClient } = require('mongodb');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { body, validationResult } = require('express-validator');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 10000;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-here-change-in-production';
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', message: 'LaunchLog API is running' });
+});
+
+// Authentication middleware
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    req.user = user;
+    next();
+  });
+};
+
+// Admin middleware
+const requireAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Serve static files from React build in production
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'dist')));
+}
+
+// MongoDB connection
+let db;
+let isConnected = false;
+let client = null;
+
+// Only create MongoDB client if connection string is provided
+if (process.env.MONGODB_CONNECTION_STRING) {
+  client = new MongoClient(process.env.MONGODB_CONNECTION_STRING, {
+    serverApi: {
+      version: '1',
+      strict: true,
+      deprecationErrors: true,
+    }
+  });
+}
+
+async function connectToDatabase() {
+  try {
+    await client.connect();
+    await client.db('admin').command({ ping: 1 });
+    db = client.db('launchlog');
+    isConnected = true;
+    console.log('✅ Connected to MongoDB Atlas');
+  } catch (error) {
+    console.error('❌ MongoDB connection error:', error);
+    console.log('⚠️ Running in fallback mode - data will not persist');
+    isConnected = false;
+  }
+}
+
+// Authentication Routes
+
+// Register user
+app.post('/api/auth/register', [
+  body('email').isEmail().normalizeEmail(),
+  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('name').trim().isLength({ min: 2 }).withMessage('Name must be at least 2 characters')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { email, password, name } = req.body;
+
+    // Check if user already exists
+    if (isConnected) {
+      const existingUser = await db.collection('users').findOne({ email });
+      if (existingUser) {
+        return res.status(400).json({ error: 'User already exists' });
+      }
+    } else {
+      // Check fallback storage
+      const existingUser = fallbackUsers.find(user => user.email === email);
+      if (existingUser) {
+        return res.status(400).json({ error: 'User already exists' });
+      }
+    }
+
+    // Hash password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    const newUser = {
+      email,
+      password: hashedPassword,
+      name,
+      role: email === 'admin@launchlog.com' ? 'admin' : 'user', // Make admin@launchlog.com an admin
+      createdAt: new Date()
+    };
+
+    let userId;
+    if (isConnected) {
+      const result = await db.collection('users').insertOne(newUser);
+      userId = result.insertedId.toString();
+    } else {
+      userId = Date.now().toString();
+      newUser.id = userId;
+      fallbackUsers.push(newUser);
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId, email, name, role: newUser.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.status(201).json({
+      message: 'User created successfully',
+      token,
+      user: { id: userId, email, name, role: newUser.role }
+    });
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Login user
+app.post('/api/auth/login', [
+  body('email').isEmail().normalizeEmail(),
+  body('password').notEmpty()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { email, password } = req.body;
+
+    // Find user
+    let user;
+    if (isConnected) {
+      user = await db.collection('users').findOne({ email });
+    } else {
+      user = fallbackUsers.find(u => u.email === email);
+    }
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Check password
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    if (!isValidPassword) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Generate JWT token
+    const userId = user.id || user._id.toString();
+    // Auto-promote admin email to admin role
+    let userRole = user.role || 'user';
+    if (user.email === 'admin@launchlog.com' && userRole !== 'admin') {
+      userRole = 'admin';
+      // Update role in database
+      try {
+        if (isConnected) {
+          await db.collection('users').updateOne(
+            { email: user.email },
+            { $set: { role: 'admin' } }
+          );
+        } else {
+          // Update fallback storage
+          const userIndex = fallbackUsers.findIndex(u => u.email === user.email);
+          if (userIndex > -1) {
+            fallbackUsers[userIndex].role = 'admin';
+          }
+        }
+      } catch (err) {
+        console.error('Error updating user role:', err);
+      }
+    }
+    
+    const token = jwt.sign(
+      { userId, email: user.email, name: user.name, role: userRole },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      message: 'Login successful',
+      token,
+      user: { id: userId, email: user.email, name: user.name, role: userRole }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Admin Routes
+
+// Get all users (admin only)
+app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    if (isConnected) {
+      const users = await db.collection('users').find({}, { projection: { password: 0 } }).toArray();
+      res.json(users);
+    } else {
+      // Return fallback users without passwords
+      const safeUsers = fallbackUsers.map(user => {
+        const { password, ...safeUser } = user;
+        return safeUser;
+      });
+      res.json(safeUsers);
+    }
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// Get user stats (admin only)
+app.get('/api/admin/stats', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    let totalUsers = 0;
+    let totalSessions = 0;
+    let totalTasks = 0;
+
+    if (isConnected) {
+      totalUsers = await db.collection('users').countDocuments();
+      const allUserData = await db.collection('userData').find({}).toArray();
+      totalSessions = allUserData.reduce((sum, user) => sum + (user.timerSessions?.length || 0), 0);
+      totalTasks = allUserData.reduce((sum, user) => {
+        const tasks = user.tasks || { todo: [], doing: [], done: [] };
+        return sum + tasks.todo.length + tasks.doing.length + tasks.done.length;
+      }, 0);
+    } else {
+      totalUsers = fallbackUsers.length;
+      Object.values(fallbackData).forEach(userData => {
+        if (userData.timerSessions) totalSessions += userData.timerSessions.length;
+        if (userData.tasks) {
+          totalTasks += userData.tasks.todo.length + userData.tasks.doing.length + userData.tasks.done.length;
+        }
+      });
+    }
+
+    res.json({
+      totalUsers,
+      totalSessions,
+      totalTasks,
+      systemStatus: isConnected ? 'MongoDB Connected' : 'Fallback Mode'
+    });
+  } catch (error) {
+    console.error('Error fetching admin stats:', error);
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
+// Delete user (admin only)
+app.delete('/api/admin/users/:userId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    if (isConnected) {
+      await db.collection('users').deleteOne({ _id: new require('mongodb').ObjectId(userId) });
+      await db.collection('userData').deleteOne({ userId });
+    } else {
+      // Remove from fallback storage
+      const userIndex = fallbackUsers.findIndex(user => user.id === userId);
+      if (userIndex > -1) {
+        fallbackUsers.splice(userIndex, 1);
+      }
+      delete fallbackData[userId];
+    }
+    
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+// API Routes
+
+// In-memory fallback storage for users
+let fallbackUsers = [];
+
+// In-memory fallback storage
+let fallbackData = {
+  userId: 'default',
+  timerSessions: [],
+  tasks: { todo: [], doing: [], done: [] },
+  jobs: [],
+  dashboardData: {
+    totalHours: 0,
+    completedTasks: 0,
+    activeApplications: 0,
+    sessionsThisWeek: 0
+  }
+};
+
+// Get user data
+app.get('/api/user-data', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    if (!isConnected) {
+      // Return user-specific fallback data
+      if (!fallbackData[userId]) {
+        fallbackData[userId] = {
+          userId,
+          timerSessions: [],
+          tasks: { todo: [], doing: [], done: [] },
+          jobs: [],
+          dashboardData: {
+            totalHours: 0,
+            completedTasks: 0,
+            activeApplications: 0,
+            sessionsThisWeek: 0
+          }
+        };
+      }
+      return res.json(fallbackData[userId]);
+    }
+
+    const userData = await db.collection('userData').findOne({ userId });
+    if (!userData) {
+      const defaultData = {
+        userId,
+        timerSessions: [],
+        tasks: { todo: [], doing: [], done: [] },
+        jobs: [],
+        dashboardData: {
+          totalHours: 0,
+          completedTasks: 0,
+          activeApplications: 0,
+          sessionsThisWeek: 0
+        }
+      };
+      res.json(defaultData);
+    } else {
+      res.json(userData);
+    }
+  } catch (error) {
+    console.error('Error fetching user data:', error);
+    res.status(500).json({ error: 'Failed to fetch user data' });
+  }
+});
+
+// Save timer session
+app.post('/api/timer-sessions', authenticateToken, async (req, res) => {
+  try {
+    const { session } = req.body;
+    const userId = req.user.userId;
+    
+    if (!isConnected) {
+      if (!fallbackData[userId]) {
+        fallbackData[userId] = { 
+          userId, 
+          timerSessions: [], 
+          tasks: { todo: [], doing: [], done: [] }, 
+          jobs: [], 
+          dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 } 
+        };
+      }
+      fallbackData[userId].timerSessions.push(session);
+      return res.json({ success: true, fallback: true });
+    }
+
+    await db.collection('userData').updateOne(
+      { userId },
+      { 
+        $push: { timerSessions: session },
+        $setOnInsert: { userId }
+      },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error saving timer session:', error);
+    const userId = req.user.userId;
+    if (!fallbackData[userId]) {
+      fallbackData[userId] = { 
+        userId, 
+        timerSessions: [], 
+        tasks: { todo: [], doing: [], done: [] }, 
+        jobs: [], 
+        dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 } 
+      };
+    }
+    fallbackData[userId].timerSessions.push(session);
+    res.json({ success: true, fallback: true });
+  }
+});
+
+// Update tasks
+app.put('/api/tasks', authenticateToken, async (req, res) => {
+  try {
+    const { tasks } = req.body;
+    const userId = req.user.userId;
+    
+    if (!isConnected) {
+      if (!fallbackData[userId]) {
+        fallbackData[userId] = { 
+          userId, 
+          timerSessions: [], 
+          tasks: { todo: [], doing: [], done: [] }, 
+          jobs: [], 
+          dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 } 
+        };
+      }
+      fallbackData[userId].tasks = tasks;
+      return res.json({ success: true, fallback: true });
+    }
+
+    await db.collection('userData').updateOne(
+      { userId },
+      { 
+        $set: { tasks },
+        $setOnInsert: { userId }
+      },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating tasks:', error);
+    const userId = req.user.userId;
+    if (!fallbackData[userId]) {
+      fallbackData[userId] = { 
+        userId, 
+        timerSessions: [], 
+        tasks: { todo: [], doing: [], done: [] }, 
+        jobs: [], 
+        dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 } 
+      };
+    }
+    fallbackData[userId].tasks = tasks;
+    res.json({ success: true, fallback: true });
+  }
+});
+
+// Save job application
+app.post('/api/jobs', async (req, res) => {
+  try {
+    const { job } = req.body;
+    
+    if (!isConnected) {
+      fallbackData.jobs.push(job);
+      return res.json({ success: true, fallback: true });
+    }
+
+    await db.collection('userData').updateOne(
+      { userId: 'default' },
+      { 
+        $push: { jobs: job },
+        $setOnInsert: { userId: 'default' }
+      },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error saving job:', error);
+    fallbackData.jobs.push(job);
+    res.json({ success: true, fallback: true });
+  }
+});
+
+// Update job application
+app.put('/api/jobs/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { updatedJob } = req.body;
+    
+    if (!isConnected) {
+      const jobIndex = fallbackData.jobs.findIndex(job => job.id === jobId);
+      if (jobIndex !== -1) {
+        fallbackData.jobs[jobIndex] = updatedJob;
+      }
+      return res.json({ success: true, fallback: true });
+    }
+    
+    await db.collection('userData').updateOne(
+      { userId: 'default', 'jobs.id': jobId },
+      { $set: { 'jobs.$': updatedJob } }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating job:', error);
+    const jobIndex = fallbackData.jobs.findIndex(job => job.id === jobId);
+    if (jobIndex !== -1) {
+      fallbackData.jobs[jobIndex] = updatedJob;
+    }
+    res.json({ success: true, fallback: true });
+  }
+});
+
+// Delete job application
+app.delete('/api/jobs/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    
+    if (!isConnected) {
+      fallbackData.jobs = fallbackData.jobs.filter(job => job.id !== jobId);
+      return res.json({ success: true, fallback: true });
+    }
+    
+    await db.collection('userData').updateOne(
+      { userId: 'default' },
+      { $pull: { jobs: { id: jobId } } }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting job:', error);
+    fallbackData.jobs = fallbackData.jobs.filter(job => job.id !== jobId);
+    res.json({ success: true, fallback: true });
+  }
+});
+
+// Update dashboard data
+app.put('/api/dashboard', async (req, res) => {
+  try {
+    const { dashboardData } = req.body;
+    
+    if (!isConnected) {
+      fallbackData.dashboardData = dashboardData;
+      return res.json({ success: true, fallback: true });
+    }
+    
+    await db.collection('userData').updateOne(
+      { userId: 'default' },
+      { 
+        $set: { dashboardData },
+        $setOnInsert: { userId: 'default' }
+      },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating dashboard data:', error);
+    fallbackData.dashboardData = dashboardData;
+    res.json({ success: true, fallback: true });
+  }
+});
+
+// Reset all data
+app.delete('/api/reset', async (req, res) => {
+  try {
+    fallbackData = {
+      userId: 'default',
+      timerSessions: [],
+      tasks: { todo: [], doing: [], done: [] },
+      jobs: [],
+      dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
+    };
+    
+    if (isConnected) {
+      await db.collection('userData').deleteOne({ userId: 'default' });
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error resetting data:', error);
+    res.json({ success: true, fallback: true });
+  }
+});
+
+// Catch all handler for React Router (must be after API routes)
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res) => {
+    // Only serve index.html for GET requests that don't start with /api
+    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      res.sendFile(path.join(__dirname, 'dist/index.html'));
+    } else {
+      res.status(404).json({ error: 'Not found' });
+    }
+  });
+}
+
+// Start server
+connectToDatabase().then(() => {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('Closing MongoDB connection...');
+  await client.close();
+  process.exit(0);
+});
