@@ -8,7 +8,7 @@ const { body, validationResult } = require('express-validator');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-here-change-in-production';
 
 // Health check endpoint
@@ -318,6 +318,7 @@ let fallbackData = {
   timerSessions: [],
   tasks: { todo: [], doing: [], done: [] },
   jobs: [],
+  subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
   dashboardData: {
     totalHours: 0,
     completedTasks: 0,
@@ -339,6 +340,7 @@ app.get('/api/user-data', authenticateToken, async (req, res) => {
           timerSessions: [],
           tasks: { todo: [], doing: [], done: [] },
           jobs: [],
+          subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
           dashboardData: {
             totalHours: 0,
             completedTasks: 0,
@@ -357,6 +359,7 @@ app.get('/api/user-data', authenticateToken, async (req, res) => {
         timerSessions: [],
         tasks: { todo: [], doing: [], done: [] },
         jobs: [],
+        subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
         dashboardData: {
           totalHours: 0,
           completedTasks: 0,
@@ -569,6 +572,128 @@ app.put('/api/dashboard', async (req, res) => {
   }
 });
 
+// Subject management endpoints
+
+// Get subjects
+app.get('/api/subjects', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    if (!isConnected) {
+      if (!fallbackData[userId]) {
+        fallbackData[userId] = {
+          userId,
+          timerSessions: [],
+          tasks: { todo: [], doing: [], done: [] },
+          jobs: [],
+          subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
+          dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
+        };
+      }
+      return res.json({ subjects: fallbackData[userId].subjects });
+    }
+
+    const userData = await db.collection('userData').findOne({ userId });
+    if (!userData || !userData.subjects) {
+      const defaultSubjects = ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'];
+      return res.json({ subjects: defaultSubjects });
+    }
+    
+    res.json({ subjects: userData.subjects });
+  } catch (error) {
+    console.error('Error fetching subjects:', error);
+    res.status(500).json({ error: 'Failed to fetch subjects' });
+  }
+});
+
+// Add subject
+app.post('/api/subjects', authenticateToken, async (req, res) => {
+  try {
+    const { subject } = req.body;
+    const userId = req.user.userId;
+    
+    if (!subject || typeof subject !== 'string' || subject.trim().length === 0) {
+      return res.status(400).json({ error: 'Subject name is required' });
+    }
+    
+    const trimmedSubject = subject.trim();
+    
+    if (!isConnected) {
+      if (!fallbackData[userId]) {
+        fallbackData[userId] = {
+          userId,
+          timerSessions: [],
+          tasks: { todo: [], doing: [], done: [] },
+          jobs: [],
+          subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
+          dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
+        };
+      }
+      
+      if (!fallbackData[userId].subjects.includes(trimmedSubject)) {
+        fallbackData[userId].subjects.push(trimmedSubject);
+      }
+      return res.json({ success: true, subjects: fallbackData[userId].subjects });
+    }
+
+    await db.collection('userData').updateOne(
+      { userId },
+      { 
+        $addToSet: { subjects: trimmedSubject },
+        $setOnInsert: { 
+          userId,
+          timerSessions: [],
+          tasks: { todo: [], doing: [], done: [] },
+          jobs: [],
+          dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
+        }
+      },
+      { upsert: true }
+    );
+    
+    const userData = await db.collection('userData').findOne({ userId });
+    res.json({ success: true, subjects: userData.subjects });
+  } catch (error) {
+    console.error('Error adding subject:', error);
+    res.status(500).json({ error: 'Failed to add subject' });
+  }
+});
+
+// Remove subject
+app.delete('/api/subjects/:subject', authenticateToken, async (req, res) => {
+  try {
+    const { subject } = req.params;
+    const userId = req.user.userId;
+    
+    if (!isConnected) {
+      if (!fallbackData[userId]) {
+        fallbackData[userId] = {
+          userId,
+          timerSessions: [],
+          tasks: { todo: [], doing: [], done: [] },
+          jobs: [],
+          subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
+          dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
+        };
+      }
+      
+      fallbackData[userId].subjects = fallbackData[userId].subjects.filter(s => s !== subject);
+      return res.json({ success: true, subjects: fallbackData[userId].subjects });
+    }
+
+    await db.collection('userData').updateOne(
+      { userId },
+      { $pull: { subjects: subject } }
+    );
+    
+    const userData = await db.collection('userData').findOne({ userId });
+    res.json({ success: true, subjects: userData.subjects || [] });
+  } catch (error) {
+    console.error('Error removing subject:', error);
+    res.status(500).json({ error: 'Failed to remove subject' });
+  }
+});
+
 // Reset all data
 app.delete('/api/reset', async (req, res) => {
   try {
@@ -577,6 +702,7 @@ app.delete('/api/reset', async (req, res) => {
       timerSessions: [],
       tasks: { todo: [], doing: [], done: [] },
       jobs: [],
+      subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
       dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
     };
     

@@ -6,6 +6,7 @@ export const useData = (isAuthenticated = false) => {
     timerSessions: [],
     tasks: { todo: [], doing: [], done: [] },
     jobs: [],
+    subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
     dashboardData: {
       totalHours: 0,
       completedTasks: 0,
@@ -200,6 +201,39 @@ export const useData = (isAuthenticated = false) => {
     }
   };
 
+  // Subject management functions
+  const loadSubjects = async () => {
+    try {
+      const response = await apiService.getSubjects();
+      setData(prev => ({ ...prev, subjects: response.subjects }));
+    } catch (err) {
+      console.error('Failed to load subjects:', err);
+      // Keep existing subjects on error
+    }
+  };
+
+  const addSubject = async (subject) => {
+    try {
+      const response = await apiService.addSubject(subject);
+      setData(prev => ({ ...prev, subjects: response.subjects }));
+      return { success: true };
+    } catch (err) {
+      console.error('Failed to add subject:', err);
+      return { success: false, error: 'Failed to add subject' };
+    }
+  };
+
+  const removeSubject = async (subject) => {
+    try {
+      const response = await apiService.removeSubject(subject);
+      setData(prev => ({ ...prev, subjects: response.subjects }));
+      return { success: true };
+    } catch (err) {
+      console.error('Failed to remove subject:', err);
+      return { success: false, error: 'Failed to remove subject' };
+    }
+  };
+
   return {
     data,
     loading,
@@ -210,6 +244,9 @@ export const useData = (isAuthenticated = false) => {
     updateJob,
     deleteJob,
     resetAllData,
-    refreshData: loadUserData
+    refreshData: loadUserData,
+    loadSubjects,
+    addSubject,
+    removeSubject
   };
 };

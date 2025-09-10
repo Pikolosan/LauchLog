@@ -87,6 +87,24 @@ class ApiService {
       method: 'DELETE',
     });
   }
+
+  // Subject management
+  async getSubjects() {
+    return this.makeRequest('/api/subjects');
+  }
+
+  async addSubject(subject) {
+    return this.makeRequest('/api/subjects', {
+      method: 'POST',
+      body: JSON.stringify({ subject }),
+    });
+  }
+
+  async removeSubject(subject) {
+    return this.makeRequest(`/api/subjects/${encodeURIComponent(subject)}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const apiService = new ApiService();

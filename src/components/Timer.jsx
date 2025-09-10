@@ -9,6 +9,9 @@ const Timer = ({ dataHook }) => {
   const [selectedSubject, setSelectedSubject] = useState('')
   const [sessions, setSessions] = useState([])
   const [timerStatus, setTimerStatus] = useState('Focus Time')
+  const [newSubject, setNewSubject] = useState('')
+  const [showAddSubject, setShowAddSubject] = useState(false)
+  const [showManageSubjects, setShowManageSubjects] = useState(false)
   
   const timerRef = useRef(null)
   const timerStartTimeRef = useRef(null)
@@ -18,6 +21,13 @@ const Timer = ({ dataHook }) => {
       setSessions(dataHook.data.timerSessions.slice(0, 10))
     }
   }, [dataHook?.data])
+
+  // Load subjects when component mounts
+  useEffect(() => {
+    if (dataHook && dataHook.loadSubjects) {
+      dataHook.loadSubjects()
+    }
+  }, [dataHook])
 
   useEffect(() => {
     if (timerMode === 'pomodoro') {
@@ -156,6 +166,35 @@ const Timer = ({ dataHook }) => {
     setTimeLeft(0)
   }
 
+  // Subject management functions
+  const handleAddSubject = async () => {
+    if (!newSubject.trim() || !dataHook) return
+    
+    const result = await dataHook.addSubject(newSubject.trim())
+    if (result.success) {
+      setNewSubject('')
+      setShowAddSubject(false)
+    } else {
+      alert(result.error || 'Failed to add subject')
+    }
+  }
+
+  const handleRemoveSubject = async (subject) => {
+    if (!dataHook || subject === 'Other') return // Don't allow removing 'Other'
+    
+    if (confirm(`Are you sure you want to remove "${subject}"?`)) {
+      const result = await dataHook.removeSubject(subject)
+      if (result.success) {
+        // If the removed subject was selected, clear the selection
+        if (selectedSubject === subject) {
+          setSelectedSubject('')
+        }
+      } else {
+        alert(result.error || 'Failed to remove subject')
+      }
+    }
+  }
+
   return (
     <section className="content-section">
       <h2 className="text-3xl font-bold mb-6">Focus Timer</h2>
@@ -164,20 +203,118 @@ const Timer = ({ dataHook }) => {
         {/* Timer Card */}
         <div className="card p-8 flex-1">
           <div className="mb-6">
-            <label className="block text-sm font-semibold text-secondary mb-3">Select Subject</label>
+            <div className="flex justify-between items-center mb-3">
+              <label className="block text-sm font-semibold text-secondary">Select Subject</label>
+              <button 
+                onClick={() => setShowAddSubject(!showAddSubject)}
+                className="btn-primary text-xs px-3 py-1 hover:bg-opacity-80 transition-all"
+              >
+                <i className="fas fa-plus mr-1"></i> Add Subject
+              </button>
+            </div>
+            
+            {/* Subject Dropdown - Clean without overlapping buttons */}
             <select 
               value={selectedSubject}
               onChange={(e) => setSelectedSubject(e.target.value)}
-              className="w-full"
+              className="w-full px-4 py-3 rounded-xl border-2 border-soft-sky-blue border-opacity-30 bg-card text-primary font-medium focus:border-soft-sky-blue focus:outline-none transition-all hover:border-opacity-50"
+              style={{
+                background: 'linear-gradient(135deg, rgba(96, 165, 250, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%)',
+              }}
             >
-              <option value="">Select a subject...</option>
-              <option value="Data Structures">Data Structures</option>
-              <option value="Algorithms">Algorithms</option>
-              <option value="System Design">System Design</option>
-              <option value="Web Development">Web Development</option>
-              <option value="Database">Database</option>
-              <option value="Other">Other</option>
+              <option value="" className="bg-card text-secondary">Select a subject...</option>
+              {dataHook?.data?.subjects?.map((subject) => (
+                <option 
+                  key={subject} 
+                  value={subject}
+                  className="bg-card text-primary py-2 hover:bg-soft-sky-blue hover:bg-opacity-10"
+                >
+                  {subject}
+                </option>
+              ))}
             </select>
+
+            {/* Add Subject Form */}
+            {showAddSubject && (
+              <div className="mt-4 p-4 bg-gradient-to-r from-soft-sky-blue from-opacity-5 to-purple-500 to-opacity-5 rounded-xl border border-soft-sky-blue border-opacity-20">
+                <div className="flex space-x-2">
+                  <input
+                    type="text"
+                    value={newSubject}
+                    onChange={(e) => setNewSubject(e.target.value)}
+                    placeholder="Enter subject name..."
+                    className="flex-1 px-4 py-2 rounded-lg border border-soft-sky-blue border-opacity-30 bg-card text-primary focus:border-soft-sky-blue focus:outline-none"
+                    onKeyPress={(e) => e.key === 'Enter' && handleAddSubject()}
+                  />
+                  <button 
+                    onClick={handleAddSubject}
+                    className="btn-success px-4 py-2 hover:bg-opacity-80 transition-all"
+                  >
+                    <i className="fas fa-check mr-1"></i> Add
+                  </button>
+                  <button 
+                    onClick={() => setShowAddSubject(false)}
+                    className="btn-secondary px-4 py-2 hover:bg-opacity-80 transition-all"
+                  >
+                    <i className="fas fa-times mr-1"></i> Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Subject Management Dropdown - Show current subjects with delete options */}
+            {dataHook?.data?.subjects && dataHook.data.subjects.length > 0 && (
+              <div className="mt-4">
+                <button
+                  onClick={() => setShowManageSubjects(!showManageSubjects)}
+                  className="w-full flex items-center justify-between p-3 bg-card border border-soft-sky-blue border-opacity-20 rounded-lg hover:bg-soft-sky-blue hover:bg-opacity-5 transition-all"
+                >
+                  <div className="flex items-center">
+                    <i className="fas fa-cog mr-2 text-secondary"></i>
+                    <span className="text-sm font-semibold text-secondary">Manage Subjects</span>
+                    <span className="ml-2 text-xs bg-soft-sky-blue bg-opacity-20 text-soft-sky-blue px-2 py-1 rounded-full">
+                      {dataHook.data.subjects.length}
+                    </span>
+                  </div>
+                  <i className={`fas fa-chevron-${showManageSubjects ? 'up' : 'down'} text-secondary transition-transform`}></i>
+                </button>
+                
+                {showManageSubjects && (
+                  <div className="mt-2 p-3 bg-gradient-to-r from-soft-sky-blue from-opacity-5 to-purple-500 to-opacity-5 rounded-lg border border-soft-sky-blue border-opacity-20">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-32 overflow-y-auto">
+                      {dataHook.data.subjects.map((subject) => (
+                        <div
+                          key={subject}
+                          className={`flex items-center justify-between p-2 rounded-lg border transition-all ${
+                            selectedSubject === subject
+                              ? 'bg-soft-sky-blue bg-opacity-20 border-soft-sky-blue'
+                              : 'bg-card border-opacity-20 border-soft-sky-blue hover:bg-opacity-5 hover:bg-soft-sky-blue'
+                          }`}
+                        >
+                          <span className="text-sm text-primary font-medium truncate flex-1">
+                            {subject}
+                          </span>
+                          <div className="flex items-center space-x-1 ml-2">
+                            {selectedSubject === subject && (
+                              <i className="fas fa-check text-soft-sky-blue text-xs"></i>
+                            )}
+                            {subject !== 'Other' && (
+                              <button
+                                onClick={() => handleRemoveSubject(subject)}
+                                className="text-red-400 hover:text-red-600 transition-colors p-1 rounded hover:bg-red-100 hover:bg-opacity-10"
+                                title={`Remove "${subject}"`}
+                              >
+                                <i className="fas fa-trash text-xs"></i>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="mb-8">
