@@ -774,36 +774,47 @@ app.post('/api/subjects', authenticateToken, async (req, res) => {
       }
       return res.json({ success: true, subjects: fallbackData[userId].subjects });
     } else {
-      // MongoDB operations - only when connected
-      // First, ensure default subjects exist if the document exists but subjects field is missing
+      // MongoDB operations - simplified approach
       const defaultSubjects = ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'];
-      await db.collection('userData').updateOne(
-        { 
-          userId, 
-          $or: [{ subjects: { $exists: false } }, { subjects: null }] 
-        },
-        { $set: { subjects: defaultSubjects } }
-      );
-
-      // Then add the new subject using $addToSet and upsert for new documents
-      await db.collection('userData').updateOne(
-        { userId },
-        { 
-          $addToSet: { subjects: trimmedSubject },
-          $setOnInsert: { 
-            userId,
-            timerSessions: [],
-            tasks: { todo: [], doing: [], done: [] },
-            jobs: [],
-            subjects: defaultSubjects,
-            dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
-          }
-        },
-        { upsert: true }
-      );
       
-      const userData = await db.collection('userData').findOne({ userId });
-      res.json({ success: true, subjects: userData.subjects });
+      // Check if user document exists
+      let userData = await db.collection('userData').findOne({ userId });
+      
+      if (!userData) {
+        // Create new document with default subjects + new subject
+        const newSubjects = [...defaultSubjects];
+        if (!newSubjects.includes(trimmedSubject)) {
+          newSubjects.push(trimmedSubject);
+        }
+        
+        const newUserData = {
+          userId,
+          timerSessions: [],
+          tasks: { todo: [], doing: [], done: [] },
+          jobs: [],
+          subjects: newSubjects,
+          dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
+        };
+        
+        await db.collection('userData').insertOne(newUserData);
+        res.json({ success: true, subjects: newSubjects });
+      } else {
+        // Update existing document
+        if (!userData.subjects || !Array.isArray(userData.subjects)) {
+          userData.subjects = defaultSubjects;
+        }
+        
+        // Add subject if not already present
+        if (!userData.subjects.includes(trimmedSubject)) {
+          await db.collection('userData').updateOne(
+            { userId },
+            { $addToSet: { subjects: trimmedSubject } }
+          );
+          userData.subjects.push(trimmedSubject);
+        }
+        
+        res.json({ success: true, subjects: userData.subjects });
+      }
     }
   } catch (error) {
     console.error('Error adding subject:', error);
@@ -904,4 +915,4 @@ const gracefulShutdown = async (signal) => {
 };
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM')); 
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
