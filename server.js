@@ -101,20 +101,28 @@ const allowedOrigins = [
   'http://127.0.0.1:5000',
   'https://localhost:5000',
   'http://localhost:3000',
-  // Add your production domain here when deploying
+  // Explicit frontend URL from environment
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, etc.)
+    // Allow requests with no origin (same-origin or mobile apps)
     if (!origin) return callback(null, true);
     
+    // Check exact matches for development
     if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+      return callback(null, true);
     }
+    
+    // For production platforms, allow common deployment domains
+    if (origin.endsWith('.replit.app') || origin.endsWith('.replit.dev') || 
+        origin.endsWith('.onrender.com') || origin.endsWith('.vercel.app') || 
+        origin.endsWith('.netlify.app') || origin.endsWith('.herokuapp.com')) {
+      return callback(null, true);
+    }
+    
+    callback(new Error('Not allowed by CORS'));
   },
   credentials: false,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -146,6 +154,12 @@ if (process.env.MONGODB_CONNECTION_STRING) {
 }
 
 async function connectToDatabase() {
+  if (!client) {
+    console.log('⚠️ No MongoDB connection string provided - running in fallback mode');
+    isConnected = false;
+    return;
+  }
+  
   try {
     await client.connect();
     await client.db('admin').command({ ping: 1 });
@@ -879,8 +893,14 @@ connectToDatabase().then(() => {
 });
 
 // Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('Closing MongoDB connection...');
-  await client.close();
+const gracefulShutdown = async (signal) => {
+  console.log(`Received ${signal}. Shutting down server gracefully...`);
+  if (client) {
+    console.log('Closing MongoDB connection...');
+    await client.close();
+  }
   process.exit(0);
-});
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
