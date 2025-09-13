@@ -1,4 +1,4 @@
-const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout }) => {
+const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout, isOpen, onClose }) => {
   const handleResetData = async () => {
     if (window.confirm('Are you sure you want to reset all data? This action cannot be undone.')) {
       try {
@@ -17,7 +17,9 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout }) 
   }
 
   return (
-    <aside className="sidebar w-64 h-screen fixed top-0 left-0 overflow-y-auto">
+    <aside className={`sidebar w-64 h-screen fixed top-0 left-0 overflow-y-auto z-50 transition-transform duration-300 ease-in-out ${
+      isOpen ? 'translate-x-0' : '-translate-x-full'
+    } lg:translate-x-0`}>
       <div className="p-4 flex flex-col h-full">
         <div className="mb-10">
           <h1 className="text-3xl font-bold mb-2 welcome-gradient">LaunchLog</h1>
@@ -26,7 +28,10 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout }) 
         
         <nav className="space-y-2 flex-grow">
           <button
-            onClick={() => setActiveSection('dashboard')}
+            onClick={() => {
+              setActiveSection('dashboard')
+              onClose && onClose() // Close sidebar on mobile
+            }}
             className={`nav-link flex items-center p-3 rounded-lg w-full text-left ${
               activeSection === 'dashboard' ? 'active-nav' : 'hover:bg-gray-800'
             }`}
@@ -35,7 +40,10 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout }) 
             <span>Dashboard</span>
           </button>
           <button
-            onClick={() => setActiveSection('timer')}
+            onClick={() => {
+              setActiveSection('timer')
+              onClose && onClose() // Close sidebar on mobile
+            }}
             className={`nav-link flex items-center p-3 rounded-lg w-full text-left ${
               activeSection === 'timer' ? 'active-nav' : 'hover:bg-gray-800'
             }`}
@@ -44,7 +52,10 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout }) 
             <span>Timer</span>
           </button>
           <button
-            onClick={() => setActiveSection('plan')}
+            onClick={() => {
+              setActiveSection('plan')
+              onClose && onClose() // Close sidebar on mobile
+            }}
             className={`nav-link flex items-center p-3 rounded-lg w-full text-left ${
               activeSection === 'plan' ? 'active-nav' : 'hover:bg-gray-800'
             }`}
@@ -53,7 +64,10 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout }) 
             <span>Plan</span>
           </button>
           <button
-            onClick={() => setActiveSection('jobs')}
+            onClick={() => {
+              setActiveSection('jobs')
+              onClose && onClose() // Close sidebar on mobile
+            }}
             className={`nav-link flex items-center p-3 rounded-lg w-full text-left ${
               activeSection === 'jobs' ? 'active-nav' : 'hover:bg-gray-800'
             }`}
@@ -63,7 +77,10 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout }) 
           </button>
           {user && user.role === 'admin' && (
             <button
-              onClick={() => setActiveSection('admin')}
+              onClick={() => {
+                setActiveSection('admin')
+                onClose && onClose() // Close sidebar on mobile
+              }}
               className={`nav-link flex items-center p-3 rounded-lg w-full text-left ${
                 activeSection === 'admin' ? 'active-nav' : 'hover:bg-gray-800'
               }`}

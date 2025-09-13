@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import zxcvbn from 'zxcvbn'
 
 const Auth = ({ onAuthSuccess }) => {
   const [isLogin, setIsLogin] = useState(true)
@@ -9,6 +10,8 @@ const Auth = ({ onAuthSuccess }) => {
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [passwordStrength, setPasswordStrength] = useState(null)
+  const [passwordErrors, setPasswordErrors] = useState([])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -47,12 +50,50 @@ const Auth = ({ onAuthSuccess }) => {
     }
   }
 
+  const validatePassword = (password) => {
+    const errors = [];
+    
+    if (password.length < 12) {
+      errors.push('At least 12 characters long');
+    }
+    
+    if (!/[a-z]/.test(password)) {
+      errors.push('One lowercase letter');
+    }
+    
+    if (!/[A-Z]/.test(password)) {
+      errors.push('One uppercase letter');
+    }
+    
+    if (!/\d/.test(password)) {
+      errors.push('One number');
+    }
+    
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+      errors.push('One special character');
+    }
+    
+    return errors;
+  };
+
   const handleChange = (e) => {
+    const { name, value } = e.target;
+    
     setFormData(prev => ({
       ...prev,
-      [e.target.name]: e.target.value
-    }))
-  }
+      [name]: value
+    }));
+    
+    // Real-time password validation for registration
+    if (name === 'password' && !isLogin && value) {
+      const strength = zxcvbn(value);
+      setPasswordStrength(strength);
+      setPasswordErrors(validatePassword(value));
+    } else if (name === 'password' && !isLogin && !value) {
+      setPasswordStrength(null);
+      setPasswordErrors([]);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-main-bg flex items-center justify-center p-8">
@@ -108,13 +149,85 @@ const Auth = ({ onAuthSuccess }) => {
                 value={formData.password}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-3 bg-main-bg border border-divider-lines rounded-lg focus:ring-2 focus:ring-soft-sky-blue focus:border-transparent text-primary-text placeholder-secondary-text"
+                className={`w-full px-4 py-3 bg-main-bg border rounded-lg focus:ring-2 focus:border-transparent text-primary-text placeholder-secondary-text ${
+                  !isLogin && formData.password ? (
+                    passwordErrors.length === 0 ? 'border-green-500 focus:ring-green-500' : 'border-red-500 focus:ring-red-500'
+                  ) : 'border-divider-lines focus:ring-soft-sky-blue'
+                }`}
                 placeholder="Enter your password"
-                minLength={6}
+                minLength={isLogin ? 1 : 12}
               />
-              {!isLogin && (
+              
+              {!isLogin && formData.password && (
+                <div className="mt-3">
+                  {/* Password Strength Meter */}
+                  {passwordStrength && (
+                    <div className="mb-3">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-xs text-secondary-text">Password Strength:</span>
+                        <span className={`text-xs font-medium ${
+                          passwordStrength.score === 0 ? 'text-red-500' :
+                          passwordStrength.score === 1 ? 'text-orange-500' :
+                          passwordStrength.score === 2 ? 'text-yellow-500' :
+                          passwordStrength.score === 3 ? 'text-blue-500' :
+                          'text-green-500'
+                        }`}>
+                          {['Very Weak', 'Weak', 'Fair', 'Good', 'Strong'][passwordStrength.score]}
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-700 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full transition-all duration-300 ${
+                            passwordStrength.score === 0 ? 'bg-red-500 w-1/5' :
+                            passwordStrength.score === 1 ? 'bg-orange-500 w-2/5' :
+                            passwordStrength.score === 2 ? 'bg-yellow-500 w-3/5' :
+                            passwordStrength.score === 3 ? 'bg-blue-500 w-4/5' :
+                            'bg-green-500 w-full'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Password Requirements */}
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-secondary-text mb-2">Password must include:</p>
+                    {[
+                      { check: formData.password.length >= 12, text: 'At least 12 characters' },
+                      { check: /[a-z]/.test(formData.password), text: 'One lowercase letter' },
+                      { check: /[A-Z]/.test(formData.password), text: 'One uppercase letter' },
+                      { check: /\d/.test(formData.password), text: 'One number' },
+                      { check: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(formData.password), text: 'One special character' }
+                    ].map((req, index) => (
+                      <div key={index} className={`flex items-center space-x-2 text-xs ${
+                        req.check ? 'text-green-400' : 'text-red-400'
+                      }`}>
+                        <i className={`fas ${req.check ? 'fa-check' : 'fa-times'}`} />
+                        <span>{req.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Password Feedback */}
+                  {passwordStrength && passwordStrength.feedback.warning && (
+                    <div className="mt-2 p-2 bg-yellow-500 bg-opacity-10 border border-yellow-500 rounded text-xs text-yellow-400">
+                      <i className="fas fa-exclamation-triangle mr-1" />
+                      {passwordStrength.feedback.warning}
+                    </div>
+                  )}
+                  
+                  {passwordStrength && passwordStrength.feedback.suggestions.length > 0 && (
+                    <div className="mt-2 p-2 bg-blue-500 bg-opacity-10 border border-blue-500 rounded text-xs text-blue-400">
+                      <i className="fas fa-lightbulb mr-1" />
+                      {passwordStrength.feedback.suggestions[0]}
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {isLogin && (
                 <p className="mt-1 text-xs text-secondary-text">
-                  Password must be at least 6 characters
+                  Enter your password to sign in
                 </p>
               )}
             </div>

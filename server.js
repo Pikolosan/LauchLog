@@ -1,6 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const mongoSanitize = require('express-mongo-sanitize');
+const compression = require('compression');
 const { MongoClient } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -9,7 +13,12 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-here-change-in-production';
+// Require JWT_SECRET from environment for security
+if (!process.env.JWT_SECRET) {
+  console.error('❌ JWT_SECRET environment variable is required for security');
+  process.exit(1);
+}
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -42,9 +51,77 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com", "https://cdnjs.cloudflare.com"],
+      scriptSrc: ["'self'", "https://cdn.tailwindcss.com"],
+      fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'"]
+    },
+  },
+}));
+
+// Rate limiting - More lenient for development
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // Increased for development use
+  message: { error: 'Too many requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 50, // Increased from 5 to 50 for development
+  message: { error: 'Too many authentication attempts, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply rate limiting
+app.use('/api/', globalLimiter);
+app.use('/api/auth/', authLimiter);
+
+// Compression and parsing middleware
+app.use(compression());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Data sanitization against NoSQL query injection
+// Note: Using manual validation in routes instead of middleware due to compatibility issues
+// app.use(mongoSanitize());
+
+// Configure CORS with specific origins
+const allowedOrigins = [
+  'http://localhost:5000',
+  'http://127.0.0.1:5000',
+  'https://localhost:5000',
+  // Add your production domain here when deploying
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: false,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Trust proxy for rate limiting to work correctly in Replit
+app.set('trust proxy', 1);
 
 // Serve static files from React build in production
 if (process.env.NODE_ENV === 'production') {
@@ -83,11 +160,50 @@ async function connectToDatabase() {
 
 // Authentication Routes
 
+// Password validation function
+const validatePassword = (password) => {
+  const errors = [];
+  
+  if (password.length < 12) {
+    errors.push('Password must be at least 12 characters long');
+  }
+  
+  if (!/[a-z]/.test(password)) {
+    errors.push('Password must contain at least one lowercase letter');
+  }
+  
+  if (!/[A-Z]/.test(password)) {
+    errors.push('Password must contain at least one uppercase letter');
+  }
+  
+  if (!/\d/.test(password)) {
+    errors.push('Password must contain at least one number');
+  }
+  
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+    errors.push('Password must contain at least one special character');
+  }
+  
+  // Check for common weak passwords
+  const commonPasswords = ['123456789012', 'password1234', 'admin1234567', 'welcome12345'];
+  if (commonPasswords.some(common => password.toLowerCase().includes(common.toLowerCase()))) {
+    errors.push('Password is too common or weak');
+  }
+  
+  return errors;
+};
+
 // Register user
 app.post('/api/auth/register', [
-  body('email').isEmail().normalizeEmail(),
-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-  body('name').trim().isLength({ min: 2 }).withMessage('Name must be at least 2 characters')
+  body('email').isEmail().normalizeEmail().isLength({ max: 254 }),
+  body('name').trim().isLength({ min: 2, max: 50 }).matches(/^[a-zA-Z\s]+$/),
+  body('password').custom((password) => {
+    const errors = validatePassword(password);
+    if (errors.length > 0) {
+      throw new Error(errors.join(', '));
+    }
+    return true;
+  })
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -111,16 +227,17 @@ app.post('/api/auth/register', [
       }
     }
 
-    // Hash password
-    const saltRounds = 10;
+    // Hash password with higher cost for better security
+    const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     const newUser = {
       email,
       password: hashedPassword,
       name,
-      role: email === 'admin@launchlog.com' ? 'admin' : 'user', // Make admin@launchlog.com an admin
-      createdAt: new Date()
+      role: email === process.env.ADMIN_EMAIL ? 'admin' : 'user', // Admin email from environment
+      createdAt: new Date(),
+      emailVerified: false // Add email verification status
     };
 
     let userId;
@@ -137,7 +254,7 @@ app.post('/api/auth/register', [
     const token = jwt.sign(
       { userId, email, name, role: newUser.role },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '15m' } // Consistent with login token expiry
     );
 
     res.status(201).json({
@@ -184,33 +301,12 @@ app.post('/api/auth/login', [
 
     // Generate JWT token
     const userId = user.id || user._id.toString();
-    // Auto-promote admin email to admin role
-    let userRole = user.role || 'user';
-    if (user.email === 'admin@launchlog.com' && userRole !== 'admin') {
-      userRole = 'admin';
-      // Update role in database
-      try {
-        if (isConnected) {
-          await db.collection('users').updateOne(
-            { email: user.email },
-            { $set: { role: 'admin' } }
-          );
-        } else {
-          // Update fallback storage
-          const userIndex = fallbackUsers.findIndex(u => u.email === user.email);
-          if (userIndex > -1) {
-            fallbackUsers[userIndex].role = 'admin';
-          }
-        }
-      } catch (err) {
-        console.error('Error updating user role:', err);
-      }
-    }
+    const userRole = user.role || 'user'; // No auto-promotion - security fix
     
     const token = jwt.sign(
       { userId, email: user.email, name: user.name, role: userRole },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '15m' } // Shorter token expiry for better security
     );
 
     res.json({
@@ -470,104 +566,132 @@ app.put('/api/tasks', authenticateToken, async (req, res) => {
 });
 
 // Save job application
-app.post('/api/jobs', async (req, res) => {
+app.post('/api/jobs', authenticateToken, async (req, res) => {
   try {
     const { job } = req.body;
+    const userId = req.user.userId;
     
     if (!isConnected) {
-      fallbackData.jobs.push(job);
+      if (!fallbackData[userId]) {
+        fallbackData[userId] = { userId, timerSessions: [], tasks: { todo: [], doing: [], done: [] }, jobs: [], dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 } };
+      }
+      fallbackData[userId].jobs.push(job);
       return res.json({ success: true, fallback: true });
     }
 
     await db.collection('userData').updateOne(
-      { userId: 'default' },
+      { userId },
       { 
         $push: { jobs: job },
-        $setOnInsert: { userId: 'default' }
+        $setOnInsert: { userId, timerSessions: [], tasks: { todo: [], doing: [], done: [] }, jobs: [], dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 } }
       },
       { upsert: true }
     );
     res.json({ success: true });
   } catch (error) {
     console.error('Error saving job:', error);
-    fallbackData.jobs.push(job);
+    const userId = req.user.userId;
+    if (!fallbackData[userId]) {
+      fallbackData[userId] = { userId, timerSessions: [], tasks: { todo: [], doing: [], done: [] }, jobs: [], dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 } };
+    }
+    fallbackData[userId].jobs.push(job);
     res.json({ success: true, fallback: true });
   }
 });
 
 // Update job application
-app.put('/api/jobs/:jobId', async (req, res) => {
+app.put('/api/jobs/:jobId', authenticateToken, async (req, res) => {
   try {
     const { jobId } = req.params;
     const { updatedJob } = req.body;
+    const userId = req.user.userId;
     
     if (!isConnected) {
-      const jobIndex = fallbackData.jobs.findIndex(job => job.id === jobId);
-      if (jobIndex !== -1) {
-        fallbackData.jobs[jobIndex] = updatedJob;
+      if (fallbackData[userId] && fallbackData[userId].jobs) {
+        const jobIndex = fallbackData[userId].jobs.findIndex(job => job.id === jobId);
+        if (jobIndex !== -1) {
+          fallbackData[userId].jobs[jobIndex] = updatedJob;
+        }
       }
       return res.json({ success: true, fallback: true });
     }
     
     await db.collection('userData').updateOne(
-      { userId: 'default', 'jobs.id': jobId },
+      { userId, 'jobs.id': jobId },
       { $set: { 'jobs.$': updatedJob } }
     );
     res.json({ success: true });
   } catch (error) {
     console.error('Error updating job:', error);
-    const jobIndex = fallbackData.jobs.findIndex(job => job.id === jobId);
-    if (jobIndex !== -1) {
-      fallbackData.jobs[jobIndex] = updatedJob;
+    const userId = req.user.userId;
+    if (fallbackData[userId] && fallbackData[userId].jobs) {
+      const jobIndex = fallbackData[userId].jobs.findIndex(job => job.id === jobId);
+      if (jobIndex !== -1) {
+        fallbackData[userId].jobs[jobIndex] = updatedJob;
+      }
     }
     res.json({ success: true, fallback: true });
   }
 });
 
 // Delete job application
-app.delete('/api/jobs/:jobId', async (req, res) => {
+app.delete('/api/jobs/:jobId', authenticateToken, async (req, res) => {
   try {
     const { jobId } = req.params;
+    const userId = req.user.userId;
     
     if (!isConnected) {
-      fallbackData.jobs = fallbackData.jobs.filter(job => job.id !== jobId);
+      if (fallbackData[userId] && fallbackData[userId].jobs) {
+        fallbackData[userId].jobs = fallbackData[userId].jobs.filter(job => job.id !== jobId);
+      }
       return res.json({ success: true, fallback: true });
     }
     
     await db.collection('userData').updateOne(
-      { userId: 'default' },
+      { userId },
       { $pull: { jobs: { id: jobId } } }
     );
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting job:', error);
-    fallbackData.jobs = fallbackData.jobs.filter(job => job.id !== jobId);
+    const userId = req.user.userId;
+    if (fallbackData[userId] && fallbackData[userId].jobs) {
+      fallbackData[userId].jobs = fallbackData[userId].jobs.filter(job => job.id !== jobId);
+    }
     res.json({ success: true, fallback: true });
   }
 });
 
 // Update dashboard data
-app.put('/api/dashboard', async (req, res) => {
+app.put('/api/dashboard', authenticateToken, async (req, res) => {
   try {
     const { dashboardData } = req.body;
+    const userId = req.user.userId;
     
     if (!isConnected) {
-      fallbackData.dashboardData = dashboardData;
+      if (!fallbackData[userId]) {
+        fallbackData[userId] = { userId, timerSessions: [], tasks: { todo: [], doing: [], done: [] }, jobs: [], dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 } };
+      }
+      fallbackData[userId].dashboardData = dashboardData;
       return res.json({ success: true, fallback: true });
     }
     
     await db.collection('userData').updateOne(
-      { userId: 'default' },
+      { userId },
       { 
         $set: { dashboardData },
-        $setOnInsert: { userId: 'default' }
+        $setOnInsert: { userId, timerSessions: [], tasks: { todo: [], doing: [], done: [] }, jobs: [], dashboardData }
       },
       { upsert: true }
     );
     res.json({ success: true });
   } catch (error) {
     console.error('Error updating dashboard data:', error);
-    fallbackData.dashboardData = dashboardData;
+    const userId = req.user.userId;
+    if (!fallbackData[userId]) {
+      fallbackData[userId] = { userId, timerSessions: [], tasks: { todo: [], doing: [], done: [] }, jobs: [], dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 } };
+    }
+    fallbackData[userId].dashboardData = dashboardData;
     res.json({ success: true, fallback: true });
   }
 });
@@ -636,6 +760,17 @@ app.post('/api/subjects', authenticateToken, async (req, res) => {
       return res.json({ success: true, subjects: fallbackData[userId].subjects });
     }
 
+    // First, ensure default subjects exist if the document exists but subjects field is missing
+    const defaultSubjects = ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'];
+    await db.collection('userData').updateOne(
+      { 
+        userId, 
+        $or: [{ subjects: { $exists: false } }, { subjects: null }] 
+      },
+      { $set: { subjects: defaultSubjects } }
+    );
+
+    // Then add the new subject using $addToSet and upsert for new documents
     await db.collection('userData').updateOne(
       { userId },
       { 
@@ -645,6 +780,7 @@ app.post('/api/subjects', authenticateToken, async (req, res) => {
           timerSessions: [],
           tasks: { todo: [], doing: [], done: [] },
           jobs: [],
+          subjects: defaultSubjects,
           dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
         }
       },
@@ -695,10 +831,12 @@ app.delete('/api/subjects/:subject', authenticateToken, async (req, res) => {
 });
 
 // Reset all data
-app.delete('/api/reset', async (req, res) => {
+app.delete('/api/reset', authenticateToken, async (req, res) => {
   try {
-    fallbackData = {
-      userId: 'default',
+    const userId = req.user.userId;
+    
+    const defaultData = {
+      userId,
       timerSessions: [],
       tasks: { todo: [], doing: [], done: [] },
       jobs: [],
@@ -706,8 +844,10 @@ app.delete('/api/reset', async (req, res) => {
       dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
     };
     
+    fallbackData[userId] = defaultData;
+    
     if (isConnected) {
-      await db.collection('userData').deleteOne({ userId: 'default' });
+      await db.collection('userData').deleteOne({ userId });
     }
     
     res.json({ success: true });
