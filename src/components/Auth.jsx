@@ -35,7 +35,18 @@ const Auth = ({ onAuthSuccess }) => {
       const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.error || 'Authentication failed')
+        // Handle different error response formats
+        let errorMessage;
+        if (data.errors && Array.isArray(data.errors)) {
+          // Validation errors from express-validator
+          errorMessage = data.errors.map(err => err.msg).join('. ');
+        } else if (data.error) {
+          // Single error message
+          errorMessage = data.error;
+        } else {
+          errorMessage = 'Authentication failed';
+        }
+        throw new Error(errorMessage);
       }
 
       // Store token and user info

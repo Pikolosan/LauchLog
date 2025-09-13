@@ -773,37 +773,38 @@ app.post('/api/subjects', authenticateToken, async (req, res) => {
         fallbackData[userId].subjects.push(trimmedSubject);
       }
       return res.json({ success: true, subjects: fallbackData[userId].subjects });
+    } else {
+      // MongoDB operations - only when connected
+      // First, ensure default subjects exist if the document exists but subjects field is missing
+      const defaultSubjects = ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'];
+      await db.collection('userData').updateOne(
+        { 
+          userId, 
+          $or: [{ subjects: { $exists: false } }, { subjects: null }] 
+        },
+        { $set: { subjects: defaultSubjects } }
+      );
+
+      // Then add the new subject using $addToSet and upsert for new documents
+      await db.collection('userData').updateOne(
+        { userId },
+        { 
+          $addToSet: { subjects: trimmedSubject },
+          $setOnInsert: { 
+            userId,
+            timerSessions: [],
+            tasks: { todo: [], doing: [], done: [] },
+            jobs: [],
+            subjects: defaultSubjects,
+            dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
+          }
+        },
+        { upsert: true }
+      );
+      
+      const userData = await db.collection('userData').findOne({ userId });
+      res.json({ success: true, subjects: userData.subjects });
     }
-
-    // First, ensure default subjects exist if the document exists but subjects field is missing
-    const defaultSubjects = ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'];
-    await db.collection('userData').updateOne(
-      { 
-        userId, 
-        $or: [{ subjects: { $exists: false } }, { subjects: null }] 
-      },
-      { $set: { subjects: defaultSubjects } }
-    );
-
-    // Then add the new subject using $addToSet and upsert for new documents
-    await db.collection('userData').updateOne(
-      { userId },
-      { 
-        $addToSet: { subjects: trimmedSubject },
-        $setOnInsert: { 
-          userId,
-          timerSessions: [],
-          tasks: { todo: [], doing: [], done: [] },
-          jobs: [],
-          subjects: defaultSubjects,
-          dashboardData: { totalHours: 0, completedTasks: 0, activeApplications: 0, sessionsThisWeek: 0 }
-        }
-      },
-      { upsert: true }
-    );
-    
-    const userData = await db.collection('userData').findOne({ userId });
-    res.json({ success: true, subjects: userData.subjects });
   } catch (error) {
     console.error('Error adding subject:', error);
     res.status(500).json({ error: 'Failed to add subject' });
@@ -903,4 +904,4 @@ const gracefulShutdown = async (signal) => {
 };
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM')); 
