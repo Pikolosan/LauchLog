@@ -57,7 +57,18 @@ const Dashboard = ({ dataHook }) => {
     })
 
     const subjects = Object.keys(subjectTotals)
-    const hoursData = Object.values(subjectTotals).map(m => (m / 60).toFixed(1))
+    // const hoursData = Object.values(subjectTotals).map(m => (m / 60).toFixed(2))
+    
+    let hoursData, unit
+    if (Math.max(...Object.values(subjectTotals)) < 60) {
+      // less than 1 hour total → use minutes
+      hoursData = Object.values(subjectTotals)
+      unit = "mins"
+    } else {
+      // otherwise use hours
+      hoursData = Object.values(subjectTotals).map(m => Number((m / 60).toFixed(2)))
+      unit = "hours"
+    }
 
     const colors = [
       'rgba(0, 243, 255, 0.7)',
@@ -94,7 +105,7 @@ const Dashboard = ({ dataHook }) => {
         tooltip: {
           callbacks: {
             label: function(context) {
-              return `${context.label}: ${context.raw} hours`
+              return `${context.label}: ${context.raw} ${unit}`
             }
           }
         }
