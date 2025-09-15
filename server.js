@@ -5,7 +5,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
 const compression = require('compression');
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
@@ -153,6 +153,24 @@ if (process.env.MONGODB_CONNECTION_STRING) {
   });
 }
 
+// In-memory fallback storage for users
+let fallbackUsers = [];
+
+// In-memory fallback storage
+let fallbackData = {
+  userId: 'default',
+  timerSessions: [],
+  tasks: { todo: [], doing: [], done: [] },
+  jobs: [],
+  subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
+  dashboardData: {
+    totalHours: 0,
+    completedTasks: 0,
+    activeApplications: 0,
+    sessionsThisWeek: 0
+  }
+};
+
 async function connectToDatabase() {
   if (!client) {
     console.log('⚠️ No MongoDB connection string provided - running in fallback mode');
@@ -269,7 +287,7 @@ app.post('/api/auth/register', [
     const token = jwt.sign(
       { userId, email, name, role: newUser.role },
       JWT_SECRET,
-      { expiresIn: '15m' } // Consistent with login token expiry
+      { expiresIn: '7d' } // 7 days for better user experience
     );
 
     res.status(201).json({
@@ -321,7 +339,7 @@ app.post('/api/auth/login', [
     const token = jwt.sign(
       { userId, email: user.email, name: user.name, role: userRole },
       JWT_SECRET,
-      { expiresIn: '15m' } // Shorter token expiry for better security
+      { expiresIn: '7d' } // 7 days for better user experience
     );
 
     res.json({
@@ -342,7 +360,15 @@ app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) =>
   try {
     if (isConnected) {
       const users = await db.collection('users').find({}, { projection: { password: 0 } }).toArray();
-      res.json(users);
+      // Normalize MongoDB users to have consistent 'id' field
+      const normalizedUsers = users.map(user => ({
+        id: user._id.toString(),
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        createdAt: user.createdAt
+      }));
+      res.json(normalizedUsers);
     } else {
       // Return fallback users without passwords
       const safeUsers = fallbackUsers.map(user => {
@@ -400,14 +426,24 @@ app.delete('/api/admin/users/:userId', authenticateToken, requireAdmin, async (r
     const { userId } = req.params;
     
     if (isConnected) {
-      await db.collection('users').deleteOne({ _id: new require('mongodb').ObjectId(userId) });
+      // Validate ObjectId format
+      if (!ObjectId.isValid(userId)) {
+        return res.status(400).json({ error: 'Invalid userId format' });
+      }
+      
+      const deleteResult = await db.collection('users').deleteOne({ _id: new ObjectId(userId) });
       await db.collection('userData').deleteOne({ userId });
+      
+      if (deleteResult.deletedCount === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
     } else {
       // Remove from fallback storage
       const userIndex = fallbackUsers.findIndex(user => user.id === userId);
-      if (userIndex > -1) {
-        fallbackUsers.splice(userIndex, 1);
+      if (userIndex === -1) {
+        return res.status(404).json({ error: 'User not found' });
       }
+      fallbackUsers.splice(userIndex, 1);
       delete fallbackData[userId];
     }
     
@@ -419,24 +455,6 @@ app.delete('/api/admin/users/:userId', authenticateToken, requireAdmin, async (r
 });
 
 // API Routes
-
-// In-memory fallback storage for users
-let fallbackUsers = [];
-
-// In-memory fallback storage
-let fallbackData = {
-  userId: 'default',
-  timerSessions: [],
-  tasks: { todo: [], doing: [], done: [] },
-  jobs: [],
-  subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
-  dashboardData: {
-    totalHours: 0,
-    completedTasks: 0,
-    activeApplications: 0,
-    sessionsThisWeek: 0
-  }
-};
 
 // Get user data
 app.get('/api/user-data', authenticateToken, async (req, res) => {

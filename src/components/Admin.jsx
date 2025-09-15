@@ -20,15 +20,15 @@ const Admin = () => {
     try {
       setLoading(true)
       const [usersData, statsData] = await Promise.all([
-        apiService.makeRequest('/api/admin/users'),
-        apiService.makeRequest('/api/admin/stats')
+        apiService.getAdminUsers(),
+        apiService.getAdminStats()
       ])
       setUsers(usersData)
       setStats(statsData)
       setError('')
     } catch (err) {
       console.error('Failed to load admin data:', err)
-      setError('Failed to load admin data')
+      setError(`Failed to load admin data: ${err.message}`)
     } finally {
       setLoading(false)
     }
@@ -37,14 +37,15 @@ const Admin = () => {
   const handleDeleteUser = async (userId, userName) => {
     if (window.confirm(`Are you sure you want to delete user "${userName}"? This action cannot be undone.`)) {
       try {
-        await apiService.makeRequest(`/api/admin/users/${userId}`, { method: 'DELETE' })
-        setUsers(users.filter(user => user._id !== userId && user.id !== userId))
+        await apiService.deleteUser(userId)
+        setUsers(users.filter(user => user.id !== userId))
         // Reload stats after deletion
-        const statsData = await apiService.makeRequest('/api/admin/stats')
+        const statsData = await apiService.getAdminStats()
         setStats(statsData)
+        setError('')
       } catch (err) {
         console.error('Failed to delete user:', err)
-        setError('Failed to delete user')
+        setError(`Failed to delete user: ${err.message}`)
       }
     }
   }
@@ -160,7 +161,7 @@ const Admin = () => {
             </thead>
             <tbody className="divide-y divide-divider-lines">
               {users.map((user) => (
-                <tr key={user._id || user.id} className="hover:bg-main-bg transition-colors">
+                <tr key={user.id} className="hover:bg-main-bg transition-colors">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
                       <div className="w-10 h-10 bg-soft-sky-blue rounded-full flex items-center justify-center text-main-bg font-bold">
@@ -189,7 +190,7 @@ const Admin = () => {
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     {user.role !== 'admin' && (
                       <button
-                        onClick={() => handleDeleteUser(user._id || user.id, user.name)}
+        onClick={() => handleDeleteUser(user.id, user.name)}
                         className="text-danger hover:text-red-400 transition-colors"
                       >
                         <i className="fas fa-trash-alt mr-1"></i>

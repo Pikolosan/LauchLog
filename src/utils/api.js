@@ -105,6 +105,36 @@ class ApiService {
       method: 'DELETE',
     });
   }
+
+  // Admin methods
+  async getAdminUsers() {
+    return this.makeRequest('/api/admin/users');
+  }
+
+  async getAdminStats() {
+    return this.makeRequest('/api/admin/stats');
+  }
+
+  async deleteUser(userId) {
+    return this.makeRequest(`/api/admin/users/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Authentication methods
+  async login(email, password) {
+    return this.makeRequest('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  }
+
+  async register(name, email, password) {
+    return this.makeRequest('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ name, email, password }),
+    });
+  }
 }
 
 export const apiService = new ApiService();
