@@ -1,4 +1,31 @@
+import React, { useState, useEffect } from 'react'
+
 const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout, isOpen, onClose }) => {
+  const [isOffline, setIsOffline] = useState(false)
+
+  // ✅ Detect browser online/offline status
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false)
+    const handleOffline = () => setIsOffline(true)
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    // ✅ Listen for backend offline events (if emitted by your fetch wrapper)
+    const handleBackendOffline = () => setIsOffline(true)
+    const handleBackendOnline = () => setIsOffline(false)
+
+    window.addEventListener('backend-offline', handleBackendOffline)
+    window.addEventListener('backend-online', handleBackendOnline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+      window.removeEventListener('backend-offline', handleBackendOffline)
+      window.removeEventListener('backend-online', handleBackendOnline)
+    }
+  }, [])
+
   const handleResetData = async () => {
     if (window.confirm('Are you sure you want to reset all data? This action cannot be undone.')) {
       try {
@@ -17,20 +44,31 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout, is
   }
 
   return (
-    <aside className={`sidebar w-64 h-screen fixed top-0 left-0 overflow-y-auto z-50 transition-transform duration-300 ease-in-out ${
-      isOpen ? 'translate-x-0' : '-translate-x-full'
-    } lg:translate-x-0`}>
+    <aside
+      className={`sidebar w-64 h-screen fixed top-0 left-0 overflow-y-auto z-50 transition-transform duration-300 ease-in-out ${
+        isOpen ? 'translate-x-0' : '-translate-x-full'
+      } lg:translate-x-0`}
+    >
       <div className="p-4 flex flex-col h-full">
+        {/* 🔴 Offline banner */}
+        {isOffline && (
+          <div className="offline-banner mb-4">
+            Working offline — your data will sync when reconnected.
+          </div>
+        )}
+
         <div className="mb-10">
           <h1 className="text-3xl font-bold mb-2 welcome-gradient">LaunchLog</h1>
-          <p className="text-sm text-secondary leading-relaxed">A launchpad for your career, logs all progress.</p>
+          <p className="text-sm text-secondary leading-relaxed">
+            A launchpad for your career, logs all progress.
+          </p>
         </div>
-        
+
         <nav className="space-y-2 flex-grow">
           <button
             onClick={() => {
               setActiveSection('dashboard')
-              onClose && onClose() // Close sidebar on mobile
+              onClose && onClose()
             }}
             className={`nav-link flex items-center p-3 rounded-lg w-full text-left ${
               activeSection === 'dashboard' ? 'active-nav' : 'hover:bg-gray-800'
@@ -42,7 +80,7 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout, is
           <button
             onClick={() => {
               setActiveSection('timer')
-              onClose && onClose() // Close sidebar on mobile
+              onClose && onClose()
             }}
             className={`nav-link flex items-center p-3 rounded-lg w-full text-left ${
               activeSection === 'timer' ? 'active-nav' : 'hover:bg-gray-800'
@@ -54,7 +92,7 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout, is
           <button
             onClick={() => {
               setActiveSection('plan')
-              onClose && onClose() // Close sidebar on mobile
+              onClose && onClose()
             }}
             className={`nav-link flex items-center p-3 rounded-lg w-full text-left ${
               activeSection === 'plan' ? 'active-nav' : 'hover:bg-gray-800'
@@ -66,7 +104,7 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout, is
           <button
             onClick={() => {
               setActiveSection('jobs')
-              onClose && onClose() // Close sidebar on mobile
+              onClose && onClose()
             }}
             className={`nav-link flex items-center p-3 rounded-lg w-full text-left ${
               activeSection === 'jobs' ? 'active-nav' : 'hover:bg-gray-800'
@@ -79,7 +117,7 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout, is
             <button
               onClick={() => {
                 setActiveSection('admin')
-                onClose && onClose() // Close sidebar on mobile
+                onClose && onClose()
               }}
               className={`nav-link flex items-center p-3 rounded-lg w-full text-left ${
                 activeSection === 'admin' ? 'active-nav' : 'hover:bg-gray-800'
@@ -90,7 +128,7 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout, is
             </button>
           )}
         </nav>
-        
+
         <div className="mt-auto pt-6 border-t border-divider-lines space-y-3">
           {user && (
             <div className="p-3 bg-elevated-bg rounded-lg">
@@ -105,14 +143,14 @@ const Sidebar = ({ activeSection, setActiveSection, dataHook, user, onLogout, is
               </div>
             </div>
           )}
-          <button 
+          <button
             onClick={handleResetData}
             className="flex items-center p-3 text-danger hover:text-soft-coral-red w-full text-left rounded-lg transition-all hover:bg-elevated-bg"
           >
             <i className="fas fa-trash-alt mr-3 text-lg"></i>
             <span className="font-medium">Reset All Data</span>
           </button>
-          <button 
+          <button
             onClick={onLogout}
             className="flex items-center p-3 text-secondary-text hover:text-primary-text w-full text-left rounded-lg transition-all hover:bg-elevated-bg"
           >

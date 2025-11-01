@@ -149,22 +149,24 @@ if (process.env.MONGODB_CONNECTION_STRING) {
       version: '1',
       strict: true,
       deprecationErrors: true,
-    }
+    },
+    tls: true,
+    // tlsAllowInvalidCertificates: true 
   });
-}
+  }
 
-// In-memory fallback storage for users
-let fallbackUsers = [];
+  // In-memory fallback storage for users
+  let fallbackUsers = [];
 
-// In-memory fallback storage
-let fallbackData = {
-  userId: 'default',
-  timerSessions: [],
-  tasks: { todo: [], doing: [], done: [] },
-  jobs: [],
-  subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
-  dashboardData: {
-    totalHours: 0,
+  // In-memory fallback storage
+  let fallbackData = {
+    userId: 'default',
+    timerSessions: [],
+    tasks: { todo: [], doing: [], done: [] },
+    jobs: [],
+    subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
+    dashboardData: {
+      totalHours: 0,
     completedTasks: 0,
     activeApplications: 0,
     sessionsThisWeek: 0
@@ -277,11 +279,28 @@ app.post('/api/auth/register', [
     if (isConnected) {
       const result = await db.collection('users').insertOne(newUser);
       userId = result.insertedId.toString();
+
+      // 🆕 Automatically create corresponding userData document
+      const defaultUserData = {
+        userId,
+        timerSessions: [],
+        tasks: { todo: [], doing: [], done: [] },
+        jobs: [],
+        subjects: ['Data Structures', 'Algorithms', 'System Design', 'Web Development', 'Database', 'Other'],
+        dashboardData: {
+          totalHours: 0,
+          completedTasks: 0,
+          activeApplications: 0,
+          sessionsThisWeek: 0
+        }
+    };
+    await db.collection('userData').insertOne(defaultUserData);
     } else {
       userId = Date.now().toString();
       newUser.id = userId;
       fallbackUsers.push(newUser);
     }
+
 
     // Generate JWT token
     const token = jwt.sign(
@@ -496,6 +515,8 @@ app.get('/api/user-data', authenticateToken, async (req, res) => {
           sessionsThisWeek: 0
         }
       };
+
+      await db.collection('userData').insertOne(defaultData); // 🆕 persist it
       res.json(defaultData);
     } else {
       res.json(userData);

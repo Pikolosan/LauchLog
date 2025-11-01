@@ -93,6 +93,5 @@ temp/
 ehthumbs.db
 Thumbs.db
 
-# Replit specific (keep these)
-# .replit
-# replit.nix
+Replit specific (keep these)
+.replit

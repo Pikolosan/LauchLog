@@ -44,6 +44,17 @@ body {
   box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
 }
 
+.offline-banner {
+  background-color: #dc2626; /* Tailwind red-600 */
+  color: white;
+  font-weight: 600;
+  padding: 8px 12px;
+  text-align: center;
+  border-radius: 6px;
+  /* animation: pulse 1.8s infinite; */
+}
+
+
 .active-nav {
   background: linear-gradient(90deg, var(--soft-sky-blue)20, transparent);
   border-left: 4px solid var(--soft-sky-blue);

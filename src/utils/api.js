@@ -18,23 +18,47 @@ class ApiService {
         ...options,
       });
 
+      // --- ✅ handle network errors or server issues
       if (!response.ok) {
+        // 500 errors might still return JSON — try parsing
+        try {
+          const errData = await response.json();
+          if (errData.offline === true) {
+            window.dispatchEvent(new Event('backend-offline'));
+          }
+        } catch {
+          /* ignore parse errors */
+        }
+
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      return await response.json();
+      const data = await response.json();
+
+      // --- ✅ Detect backend fallback (MongoDB disconnected)
+      if (data.offline === true) {
+        window.dispatchEvent(new Event('backend-offline'));
+      } else {
+        window.dispatchEvent(new Event('backend-online'));
+      }
+
+      return data;
     } catch (error) {
       console.error('API request failed:', error);
+
+      // --- ✅ Network-level errors (browser offline, fetch failed, etc.)
+      window.dispatchEvent(new Event('backend-offline'));
+
       throw error;
     }
   }
 
-  // Get all user data
+  // --- API endpoints below remain unchanged ---
+
   async getUserData() {
     return this.makeRequest('/api/user-data');
   }
 
-  // Save timer session
   async saveTimerSession(session) {
     return this.makeRequest('/api/timer-sessions', {
       method: 'POST',
@@ -42,7 +66,6 @@ class ApiService {
     });
   }
 
-  // Update tasks
   async updateTasks(tasks) {
     return this.makeRequest('/api/tasks', {
       method: 'PUT',
@@ -50,7 +73,6 @@ class ApiService {
     });
   }
 
-  // Save job application
   async saveJob(job) {
     return this.makeRequest('/api/jobs', {
       method: 'POST',
@@ -58,7 +80,6 @@ class ApiService {
     });
   }
 
-  // Update job application
   async updateJob(jobId, updatedJob) {
     return this.makeRequest(`/api/jobs/${jobId}`, {
       method: 'PUT',
@@ -66,14 +87,10 @@ class ApiService {
     });
   }
 
-  // Delete job application
   async deleteJob(jobId) {
-    return this.makeRequest(`/api/jobs/${jobId}`, {
-      method: 'DELETE',
-    });
+    return this.makeRequest(`/api/jobs/${jobId}`, { method: 'DELETE' });
   }
 
-  // Update dashboard data
   async updateDashboard(dashboardData) {
     return this.makeRequest('/api/dashboard', {
       method: 'PUT',
@@ -81,14 +98,10 @@ class ApiService {
     });
   }
 
-  // Reset all data
   async resetAllData() {
-    return this.makeRequest('/api/reset', {
-      method: 'DELETE',
-    });
+    return this.makeRequest('/api/reset', { method: 'DELETE' });
   }
 
-  // Subject management
   async getSubjects() {
     return this.makeRequest('/api/subjects');
   }
@@ -106,7 +119,6 @@ class ApiService {
     });
   }
 
-  // Admin methods
   async getAdminUsers() {
     return this.makeRequest('/api/admin/users');
   }
@@ -116,12 +128,9 @@ class ApiService {
   }
 
   async deleteUser(userId) {
-    return this.makeRequest(`/api/admin/users/${userId}`, {
-      method: 'DELETE',
-    });
+    return this.makeRequest(`/api/admin/users/${userId}`, { method: 'DELETE' });
   }
 
-  // Authentication methods
   async login(email, password) {
     return this.makeRequest('/api/auth/login', {
       method: 'POST',
