@@ -2,11 +2,47 @@
 
 **Live Demo:** [Live on Render](https://lauchlog.onrender.com)
 
+**Live Demo Video:** [Live Video](https://drive.google.com/file/d/18QAgNSx6b3wgevdnkPmjKNnhYWl-Ghv6/view?usp=sharing)
+
 ## Overview
 
 LaunchLog is a career progress tracking application that serves as "a launchpad for your career, logs all progress." It's a React-based single-page application built with modern web technologies, featuring a dark theme with neon accents and focusing on user experience through interactive dashboards and data visualization.
 
 The application appears to be designed for professionals to track their career development, goals, and progress over time with visual analytics and an intuitive interface.
+
+## 📸 Screenshots
+
+<details>
+  <summary><b>Click to view all screenshots</b></summary>
+
+  <br>
+
+  <details>
+    <summary><b>🏠 Homepage</b></summary>
+    <img width="1919" height="981" alt="Homepage Screenshot" src="https://github.com/user-attachments/assets/83698d2e-30c6-4418-b4fc-f6ebead8d58f" />
+  </details>
+
+  <details>
+    <summary><b>📊 Dashboard</b></summary>
+    <img width="1599" height="1086" alt="Dashboard Screenshot" src="https://github.com/user-attachments/assets/6e6a916f-2d2a-403e-b647-29e3f0ab7faf" />
+  </details>
+
+  <details>
+    <summary><b>⏱️ Timr</b></summary>
+    <img width="1595" height="971" alt="Timr Screenshot" src="https://github.com/user-attachments/assets/2337d05e-518b-4f13-98c6-ee3537eaeb3a" />
+  </details>
+
+  <details>
+    <summary><b>🗓️ Planner</b></summary>
+    <img width="1600" height="1172" alt="Planner Screenshot" src="https://github.com/user-attachments/assets/5f786620-f3a2-479e-9bee-cfb0ac35db1e" />
+  </details>
+
+  <details>
+    <summary><b>💼 Jobs Tracker</b></summary>
+    <img width="1599" height="1117" alt="Jobs Tracker Screenshot" src="https://github.com/user-attachments/assets/92a7af97-7015-4264-944a-713a13829826" />
+  </details>
+
+</details>
 
 ## User Preferences
 
